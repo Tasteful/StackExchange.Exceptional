@@ -5,7 +5,7 @@
         <title>StackExchange.Exceptional</title>
         <authors>Nick Craver</authors>
         <owners>Nick Craver</owners>
-        <version>1.0.1</version>
+        <version>1.0.2</version>
         <projectUrl>https://github.com/NickCraver/StackExchange.Exceptional</projectUrl>
         <licenseUrl>http://www.apache.org/licenses/LICENSE-2.0</licenseUrl>
         <tags>SQL JSON Exception Handler Errors Stack Exchange Exceptional</tags>
@@ -15,6 +15,6 @@
         <summary>.Net Error handler used internally at Stack Exchange/Stack Overflow.  Primarily for logging all unhandled exceptions to SQL, but also supporting JSON and Memory based logging.</summary>
     </metadata>
     <files>
-        <file src="bin\Release\StackExchange.Exceptional.*" target="lib" />
+        <file src="bin\Release\StackExchange.Exceptional.pdb" target="lib\net40" />
     </files>
 </package>
