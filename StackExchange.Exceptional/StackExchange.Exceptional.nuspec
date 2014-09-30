@@ -5,7 +5,7 @@
         <title>StackExchange.Exceptional</title>
         <authors>Nick Craver</authors>
         <owners>Nick Craver</owners>
-        <version>1.0.0</version>
+        <version>1.0.1</version>
         <projectUrl>https://github.com/NickCraver/StackExchange.Exceptional</projectUrl>
         <licenseUrl>http://www.apache.org/licenses/LICENSE-2.0</licenseUrl>
         <tags>SQL JSON Exception Handler Errors Stack Exchange Exceptional</tags>
