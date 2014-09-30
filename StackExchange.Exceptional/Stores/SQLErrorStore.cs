@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Configuration;
 using System.Data;
 using System.Data.SqlClient;
 using System.Linq;
@@ -35,21 +34,11 @@ namespace StackExchange.Exceptional.Stores
             _displayCount = Math.Min(settings.Size, MaximumDisplayCount);
 
             _connectionString = settings.ConnectionString.IsNullOrEmpty() 
-                ? getConnectionStringByName(settings.ConnectionStringName)
+                ? GetConnectionStringByName(settings.ConnectionStringName)
                 : settings.ConnectionString;
 
             if (_connectionString.IsNullOrEmpty())
                 throw new ArgumentOutOfRangeException("settings", "A connection string or connection string name must be specified when using a SQL error store");
-        }
-
-        static string getConnectionStringByName(string connectionStringName)
-        {
-            if (connectionStringName.IsNullOrEmpty()) return null;
-
-            var connectionString = ConfigurationManager.ConnectionStrings[connectionStringName];
-            if (connectionString == null)
-                throw new ArgumentOutOfRangeException("connectionStringName", "A connection string was not found for the connection string name provided");
-            return connectionString.ConnectionString;
         }
 
         /// <summary>
@@ -116,8 +105,7 @@ Update Exceptions
 Update Exceptions 
    Set DeletionDate = GETUTCDATE() 
  Where GUID = @guid 
-   And DeletionDate Is Null
-   And ApplicationName = @ApplicationName", new { guid, ApplicationName }) > 0;
+   And DeletionDate Is Null", new { guid, ApplicationName }) > 0;
             }
         }
 
@@ -134,8 +122,7 @@ Update Exceptions
 Update Exceptions 
    Set DeletionDate = GETUTCDATE() 
  Where GUID In @guids
-   And DeletionDate Is Null
-   And ApplicationName = @ApplicationName", new { guids, ApplicationName }) > 0;
+   And DeletionDate Is Null", new { guids }) > 0;
             }
         }
 
@@ -160,7 +147,7 @@ Delete From Exceptions
         /// Deleted all errors in the log, by setting DeletionDate = GETUTCDATE() in SQL
         /// </summary>
         /// <returns>True if any errors were deleted, false otherwise</returns>
-        protected override bool DeleteAllErrors()
+        protected override bool DeleteAllErrors(string applicationName = null)
         {
             using (var c = GetConnection())
             {
@@ -169,7 +156,7 @@ Update Exceptions
    Set DeletionDate = GETUTCDATE() 
  Where DeletionDate Is Null 
    And IsProtected = 0 
-   And ApplicationName = @ApplicationName", new { ApplicationName }) > 0;
+   And ApplicationName = @ApplicationName", new { ApplicationName = applicationName.IsNullOrEmptyReturn(ApplicationName) }) > 0;
             }
         }
 
@@ -188,7 +175,7 @@ Update Exceptions
                         {
                             error.DuplicateCount,
                             error.ErrorHash,
-                            ApplicationName,
+                            ApplicationName = error.ApplicationName.Truncate(50),
                             minDate = DateTime.UtcNow.Add(RollupThreshold.Value.Negate())
                         });
                     queryParams.Add("@newGUID", dbType: DbType.Guid, direction: ParameterDirection.Output);
@@ -252,8 +239,7 @@ Values (@GUID, @ApplicationName, @MachineName, @CreationDate, @Type, @IsProtecte
                 sqlError = c.Query<Error>(@"
 Select * 
   From Exceptions 
- Where GUID = @guid
-   And ApplicationName = @ApplicationName", new { guid, ApplicationName }).FirstOrDefault(); // a guid won't collide, but the AppName is for security
+ Where GUID = @guid", new { guid }).FirstOrDefault(); // a guid won't collide, but the AppName is for security
             }
             if (sqlError == null) return null;
 
@@ -268,7 +254,7 @@ Select *
         /// <summary>
         /// Retrieves all non-deleted application errors in the database
         /// </summary>
-        protected override int GetAllErrors(List<Error> errors)
+        protected override int GetAllErrors(List<Error> errors, string applicationName = null)
         {
             using (var c = GetConnection())
             {
@@ -277,7 +263,7 @@ Select Top (@max) *
   From Exceptions 
  Where DeletionDate Is Null
    And ApplicationName = @ApplicationName
-Order By CreationDate Desc", new { max = _displayCount, ApplicationName }));
+Order By CreationDate Desc", new { max = _displayCount, ApplicationName = applicationName.IsNullOrEmptyReturn(ApplicationName) }));
             }
 
             return errors.Count;
@@ -286,7 +272,7 @@ Order By CreationDate Desc", new { max = _displayCount, ApplicationName }));
         /// <summary>
         /// Retrieves a count of application errors since the specified date, or all time if null
         /// </summary>
-        protected override int GetErrorCount(DateTime? since = null)
+        protected override int GetErrorCount(DateTime? since = null, string applicationName = null)
         {
             using (var c = GetConnection())
             {
@@ -295,7 +281,7 @@ Select Count(*)
   From Exceptions 
  Where DeletionDate Is Null
    And ApplicationName = @ApplicationName" + (since.HasValue ? " And CreationDate > @since" : ""),
-                    new { since, ApplicationName }).FirstOrDefault();
+                    new { since, ApplicationName = applicationName.IsNullOrEmptyReturn(ApplicationName) }).FirstOrDefault();
             }
         }
 

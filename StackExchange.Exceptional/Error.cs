@@ -16,8 +16,16 @@ namespace StackExchange.Exceptional
     public class Error
     {
         internal const string CollectionErrorKey = "CollectionFetchError";
-        
-        private static readonly object initLock = new object();
+
+		/// <summary>
+		/// The convert from json
+		/// </summary>
+		public static Func<string, Error> ConvertFromJson { get; set; }
+
+		/// <summary>
+		/// The convert to json
+		/// </summary>
+	    public static Func<object, string> ConvertToJson { get; set; }
 
         /// <summary>
         /// Filters on form values *not * to log, because they contain sensitive data
@@ -31,6 +39,17 @@ namespace StackExchange.Exceptional
 
         static Error()
         {
+			ConvertFromJson = json =>
+	        {
+				var serializer = new JavaScriptSerializer();
+				return serializer.Deserialize<Error>(json);
+	        };
+			ConvertToJson = error =>
+			{
+				var serializer = new JavaScriptSerializer();
+				return serializer.Serialize(error);
+			};
+
             CookieLogFilters = new ConcurrentDictionary<string, string>();
             Settings.Current.LogFilters.CookieFilters.All.ForEach(flf => CookieLogFilters[flf.Name] = flf.ReplaceWith ?? "");
 
@@ -359,7 +378,7 @@ namespace StackExchange.Exceptional
         /// <summary>
         /// Caribles strictly for JSON serialziation, to maintain non-dictonary behavior
         /// </summary>
-        public List<NameValuePair> ServerVariablesSerialzable
+        public List<NameValuePair> ServerVariablesSerializable
         {
             get { return GetPairs(ServerVariables); }
             set { ServerVariables = GetNameValueCollection(value); }
@@ -367,7 +386,7 @@ namespace StackExchange.Exceptional
         /// <summary>
         /// Caribles strictly for JSON serialziation, to maintain non-dictonary behavior
         /// </summary>
-        public List<NameValuePair> QueryStringSerialzable
+        public List<NameValuePair> QueryStringSerializable
         {
             get { return GetPairs(QueryString); }
             set { QueryString = GetNameValueCollection(value); }
@@ -375,7 +394,7 @@ namespace StackExchange.Exceptional
         /// <summary>
         /// Caribles strictly for JSON serialziation, to maintain non-dictonary behavior
         /// </summary>
-        public List<NameValuePair> FormSerialzable
+        public List<NameValuePair> FormSerializable
         {
             get { return GetPairs(Form); }
             set { Form = GetNameValueCollection(value); }
@@ -383,7 +402,7 @@ namespace StackExchange.Exceptional
         /// <summary>
         /// Caribles strictly for JSON serialziation, to maintain non-dictonary behavior
         /// </summary>
-        public List<NameValuePair> CookiesSerialzable
+        public List<NameValuePair> CookiesSerializable
         {
             get { return GetPairs(Cookies); }
             set { Cookies = GetNameValueCollection(value); }
@@ -392,9 +411,50 @@ namespace StackExchange.Exceptional
         /// <summary>
         /// Caribles strictly for JSON serialziation, to maintain non-dictonary behavior
         /// </summary>
-        public List<NameValuePair> RequestHeadersSerialzable
+        public List<NameValuePair> RequestHeadersSerializable
         {
             get { return GetPairs(RequestHeaders); }
+            set { RequestHeaders = GetNameValueCollection(value); }
+        }
+
+        /// <summary>
+        /// Only for deserializing errors pre-spelling fix properly
+        /// </summary>
+        [ScriptIgnore]
+        public List<NameValuePair> ServerVariablesSerialzable
+        {
+            set { ServerVariables = GetNameValueCollection(value); }
+        }
+        /// <summary>
+        /// Only for deserializing errors pre-spelling fix properly
+        /// </summary>
+        [ScriptIgnore]
+        public List<NameValuePair> QueryStringSerialzable
+        {
+            set { QueryString = GetNameValueCollection(value); }
+        }
+        /// <summary>
+        /// Only for deserializing errors pre-spelling fix properly
+        /// </summary>
+        [ScriptIgnore]
+        public List<NameValuePair> FormSerialzable
+        {
+            set { Form = GetNameValueCollection(value); }
+        }
+        /// <summary>
+        /// Only for deserializing errors pre-spelling fix properly
+        /// </summary>
+        [ScriptIgnore]
+        public List<NameValuePair> CookiesSerialzable
+        {
+            set { Cookies = GetNameValueCollection(value); }
+        }
+        /// <summary>
+        /// Only for deserializing errors pre-spelling fix properly
+        /// </summary>
+        [ScriptIgnore]
+        public List<NameValuePair> RequestHeadersSerialzable
+        {
             set { RequestHeaders = GetNameValueCollection(value); }
         }
 
@@ -403,8 +463,7 @@ namespace StackExchange.Exceptional
         /// </summary>
         public string ToJson()
         {
-            var serializer = new JavaScriptSerializer();
-            return serializer.Serialize(this);
+	        return ConvertToJson(this);
         }
 
         /// <summary>
@@ -413,8 +472,7 @@ namespace StackExchange.Exceptional
         /// <returns></returns>
         public string ToDetailedJson()
         {
-            var serializer = new JavaScriptSerializer();
-            return serializer.Serialize(new
+            return ConvertToJson(new
                                             {
                                                 GUID,
                                                 ApplicationName,
@@ -436,11 +494,11 @@ namespace StackExchange.Exceptional
                                                 Type,
                                                 Url,
                                                 QueryString = ServerVariables != null ? ServerVariables["QUERY_STRING"] : null,
-                                                ServerVariables = ServerVariablesSerialzable.ToJsonDictionary(),
-                                                CookieVariables = CookiesSerialzable.ToJsonDictionary(),
-                                                RequestHeaders = RequestHeadersSerialzable.ToJsonDictionary(),
-                                                QueryStringVariables = QueryStringSerialzable.ToJsonDictionary(),
-                                                FormVariables = FormSerialzable.ToJsonDictionary()
+                                                ServerVariables = ServerVariablesSerializable.ToJsonDictionary(),
+                                                CookieVariables = CookiesSerializable.ToJsonDictionary(),
+                                                RequestHeaders = RequestHeadersSerializable.ToJsonDictionary(),
+                                                QueryStringVariables = QueryStringSerializable.ToJsonDictionary(),
+                                                FormVariables = FormSerializable.ToJsonDictionary()
                                             });
         }
 
@@ -451,9 +509,7 @@ namespace StackExchange.Exceptional
         /// <returns>The Error object</returns>
         public static Error FromJson(string json)
         {
-            var serializer = new JavaScriptSerializer();
-            var result = serializer.Deserialize<Error>(json);
-            return result;
+	        return ConvertFromJson(json);
         }
 
         /// <summary>
@@ -475,7 +531,7 @@ namespace StackExchange.Exceptional
         private List<NameValuePair> GetPairs(NameValueCollection nvc)
         {
             var result = new List<NameValuePair>();
-            if (nvc == null) return result;
+            if (nvc == null) return null;
 
             for (int i = 0; i < nvc.Count; i++)
             {
@@ -487,7 +543,7 @@ namespace StackExchange.Exceptional
         private NameValueCollection GetNameValueCollection(List<NameValuePair> pairs)
         {
             var result = new NameValueCollection();
-            if (pairs == null) return result;
+            if (pairs == null) return null;
 
             foreach(var p in pairs)
             {

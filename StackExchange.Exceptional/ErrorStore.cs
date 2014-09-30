@@ -1,13 +1,18 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Configuration;
 using System.Data.SqlClient;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
+using System.Net.Mime;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Transactions;
 using System.Web;
+using System.Web.UI;
 using StackExchange.Exceptional.Email;
 using StackExchange.Exceptional.Stores;
 using StackExchange.Exceptional.Extensions;
@@ -137,17 +142,17 @@ namespace StackExchange.Exceptional
         /// <summary>
         /// Deletes all non-protected errors from the log
         /// </summary>
-        protected abstract bool DeleteAllErrors();
+        protected abstract bool DeleteAllErrors(string applicationName = null);
 
         /// <summary>
         /// Retrieves all of the errors in the log
         /// </summary>
-        protected abstract int GetAllErrors(List<Error> list);
+        protected abstract int GetAllErrors(List<Error> list, string applicationName = null);
 
         /// <summary>
         /// Retrieves a count of application errors since the specified date, or all time if null
         /// </summary>
-        protected abstract int GetErrorCount(DateTime? since = null);
+        protected abstract int GetErrorCount(DateTime? since = null, string applicationName = null);
 
         /// <summary>
         /// Get the name of this error log store implementation.
@@ -333,7 +338,7 @@ namespace StackExchange.Exceptional
         /// <summary>
         /// Deletes all non-protected errors from the log
         /// </summary>
-        public bool DeleteAll()
+        public bool DeleteAll(string applicationName = null)
         {
             if (_isInRetry)
             {
@@ -345,7 +350,7 @@ namespace StackExchange.Exceptional
             {
                 using (new TransactionScope(TransactionScopeOption.Suppress))
                 {
-                    return DeleteAllErrors();
+                    return DeleteAllErrors(applicationName);
                 }
             }
             catch (Exception ex)
@@ -373,7 +378,7 @@ namespace StackExchange.Exceptional
         /// <summary>
         /// Gets all in the store, including those in the backup queue if it's in use
         /// </summary>
-        public int GetAll(List<Error> errors)
+        public int GetAll(List<Error> errors, string applicationName = null)
         {
             if (_isInRetry)
             {
@@ -381,7 +386,7 @@ namespace StackExchange.Exceptional
                 return errors.Count;
             }
 
-            try { return GetAllErrors(errors); }
+            try { return GetAllErrors(errors, applicationName); }
             catch (Exception ex) { BeginRetry(ex); }
             return 0;
         }
@@ -389,14 +394,14 @@ namespace StackExchange.Exceptional
         /// <summary>
         /// Gets the count of exceptions, optionally those since a certain date
         /// </summary>
-        public int GetCount(DateTime? since = null)
+        public int GetCount(DateTime? since = null, string applicationName = null)
         {
             if (_isInRetry)
             {
                 return WriteQueue.Count;
             }
 
-            try { return GetErrorCount(since); }
+            try { return GetErrorCount(since, applicationName); }
             catch (Exception ex) { BeginRetry(ex); }
             return 0;
         }
@@ -510,17 +515,64 @@ namespace StackExchange.Exceptional
             if (settings.Size < 1) 
                 throw new ArgumentOutOfRangeException("settings","ErrorStore 'size' must be positive");
 
-            switch (settings.Type)
+            var storeTypes = GetErrorStores();
+            // Search by convention first
+            var match = storeTypes.FirstOrDefault(s => s.Name == settings.Type + "ErrorStore");
+            if (match == null)
             {
-                case "JSON":
-                    return new JSONErrorStore(settings);
-                case "Memory":
-                    return new MemoryErrorStore(settings);
-                case "SQL":
-                    return new SQLErrorStore(settings);
-                default:
-                    throw new Exception("Unknwon error store type: " + settings.Type);
+                // well shit, free for all!
+                match = storeTypes.FirstOrDefault(s => s.Name.Contains(settings.Type));
             }
+
+            if (match == null)
+            {
+                throw new Exception("Could not find error store type: " + settings.Type);
+            }
+
+            try
+            {
+                return (ErrorStore) Activator.CreateInstance(match, settings);
+            }
+            catch (Exception ex)
+            {
+                throw new Exception("Error creating a " + settings.Type + " error store: " + ex.Message, ex);
+            }
+        }
+
+        private static List<Type> GetErrorStores()
+        {
+            var result = new List<Type>();
+            // Get the current directory, based on Where StackExchange.Exceptional.dll is located
+            var path = typeof (ErrorStore).Assembly.Location;
+            var dir = Path.GetDirectoryName(path);
+
+            if (dir == null)
+            {
+                Trace.WriteLine("Error loading Error stores, path: " + path);
+                return result;
+            }
+
+            try
+            {
+                // It's intentional even the core error stores load this way, as a sanity check
+                foreach (var filename in Directory.GetFiles(dir, "StackExchange.Exceptional*.dll"))
+                {
+                    try
+                    {
+                        var assembly = Assembly.LoadFrom(filename);
+                        result.AddRange(assembly.GetTypes().Where(type => type.IsSubclassOf(typeof (ErrorStore))));
+                    }
+                    catch (Exception e)
+                    {
+                        Trace.WriteLine(string.Format("Error loading ErrorStore types from {0}: {1}", filename, e.Message));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Trace.WriteLine("Error loading error stores: " + ex.Message);
+            }
+            return result;
         }
 
         /// <summary>
@@ -528,7 +580,7 @@ namespace StackExchange.Exceptional
         /// so that they don't have to carry a reference to System.Web
         /// </summary>
         /// <param name="ex">The exception to log</param>
-        /// <param name="appendFullStackTrace">Wehther to append a full stack trace to the exception's detail</param>
+        /// <param name="appendFullStackTrace">Whether to append a full stack trace to the exception's detail</param>
         /// <param name="rollupPerServer">Whether to log up per-server, e.g. errors are only duplicates if they have same stack on the same machine</param>
         /// <param name="customData">Any custom data to store with the exception like UserId, etc...this will be rendered as JSON in the error view for script use</param>
         public static Error LogExceptionWithoutContext(Exception ex, bool appendFullStackTrace = false, bool rollupPerServer = false, Dictionary<string, string> customData = null)
@@ -541,7 +593,7 @@ namespace StackExchange.Exceptional
         /// </summary>
         /// <param name="ex">The exception to log</param>
         /// <param name="context">The HTTPContext to record variables from.  If this isn't a web request, pass <see langword="null" /> in here</param>
-        /// <param name="appendFullStackTrace">Wehther to append a full stack trace to the exception's detail</param>
+        /// <param name="appendFullStackTrace">Whether to append a full stack trace to the exception's detail</param>
         /// <param name="rollupPerServer">Whether to log up per-server, e.g. errors are only duplicates if they have same stack on the same machine</param>
         /// <param name="customData">Any custom data to store with the exception like UserId, etc...this will be rendered as JSON in the error view for script use</param>
         /// <param name="applicationName">If specified, the application name to log with, if not specified the name in the config is used</param>
@@ -579,6 +631,19 @@ namespace StackExchange.Exceptional
                                     RollupPerServer = rollupPerServer,
                                     CustomData = customData
                                 };
+
+                if (GetIPAddress != null)
+                {
+                    try
+                    {
+                        error.IPAddress = GetIPAddress();
+                    }
+                    catch (Exception gipe)
+                    {
+                        // if there was an error getting the IP, log it so we can display such in the view...and not fail to log the original error
+                        error.CustomData.Add(CustomDataErrorKey, "Fetching IP Adddress: " + gipe);
+                    }
+                }
 
                 var exCursor = ex;
                 while (exCursor != null)
@@ -640,9 +705,16 @@ namespace StackExchange.Exceptional
             var se = exception as SqlException;
             if (se != null)
             {
+                if (error.CustomData == null) 
+                    error.CustomData = new Dictionary<string, string>();
+
                 error.CustomData["SQL-Server"] = se.Server;
                 error.CustomData["SQL-ErrorNumber"] = se.Number.ToString();
                 error.CustomData["SQL-LineNumber"] = se.LineNumber.ToString();
+                if (se.Procedure.HasValue())
+                {
+                    error.CustomData["SQL-Procedure"] = se.Procedure;
+                }
             }
         }
 
@@ -654,6 +726,22 @@ namespace StackExchange.Exceptional
             if (t.FullName == className) return true;
 
             return t.BaseType != null && IsDescendentOf(t.BaseType, className);
+        }
+
+        /// <summary>
+        /// Gets the connection string from the connectionStrings configuration element, from web.config or app.config, throws if not found.
+        /// </summary>
+        /// <param name="connectionStringName">The connection string name to fetch</param>
+        /// <returns>The connection string requested</returns>
+        /// <exception cref="ConfigurationErrorsException">Connection string was not found</exception>
+        protected static string GetConnectionStringByName(string connectionStringName)
+        {
+            if (connectionStringName.IsNullOrEmpty()) return null;
+
+            var connectionString = ConfigurationManager.ConnectionStrings[connectionStringName];
+            if (connectionString == null)
+                throw new ConfigurationErrorsException("A connection string was not found for the connection string name provided");
+            return connectionString.ConnectionString;
         }
     }
 }
